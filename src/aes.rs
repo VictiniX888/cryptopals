@@ -2,7 +2,7 @@ use crate::{util, xor};
 use openssl::{cipher::Cipher, cipher_ctx::CipherCtx};
 use rand::{distributions::Uniform, thread_rng, Rng};
 
-pub fn detect_aes_ecb_from_oracle(oracle: fn(&[u8]) -> Vec<u8>) -> bool {
+pub fn detect_aes_ecb_from_oracle(oracle: impl Fn(&[u8]) -> Vec<u8>) -> bool {
     let bytes = [b'\0'; 16 * 3];
     let encrypted = oracle(&bytes);
 
@@ -77,6 +77,69 @@ pub fn encrypt_aes_cbc(bytes: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
 }
 
 /* ========== ECB ========== */
+pub fn decrypt_aes_ecb_with_oracle(oracle: impl Fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
+    // Find block size of cipher (should be 16)
+    let encrypted = oracle(&[]);
+    let mut block_size = 0;
+    for i in 1..encrypted.len() {
+        if &oracle(&vec![0; i])[i..i * 2] == &encrypted[..i] {
+            block_size = i;
+            break;
+        }
+    }
+    assert_eq!(block_size, 16);
+
+    // Check that function is using ECB
+    let is_ecb = detect_aes_ecb_from_oracle(&oracle);
+    assert!(is_ecb);
+
+    let mut unknown_string = Vec::with_capacity(encrypted.len());
+
+    // Decrypt unknown string
+    for block in 0..(encrypted.len() / block_size) {
+        let mut input = vec![0; block_size];
+        while !input.is_empty() {
+            // Make input block that is 1 byte short
+            input.pop();
+
+            let encrypted = oracle(&input);
+
+            // Match output
+            for byte in u8::MIN..=u8::MAX {
+                let mut input = input.clone();
+                input.extend_from_slice(&unknown_string);
+                input.push(byte);
+                let matcher = oracle(&input);
+
+                if &encrypted[block_size * block..block_size * (block + 1)]
+                    == &matcher[block_size * block..block_size * (block + 1)]
+                {
+                    unknown_string.push(byte);
+                    break;
+                }
+            }
+        }
+    }
+
+    unknown_string
+}
+
+pub fn gen_aes_ecb_oracle(unknown_string: &[u8]) -> impl Fn(&[u8]) -> Vec<u8> {
+    let unknown_string = unknown_string.to_vec();
+    let mut key = [0u8; 16];
+    thread_rng().fill(&mut key);
+
+    move |plaintext: &[u8]| aes_ecb_oracle(plaintext, &unknown_string, &key)
+}
+
+fn aes_ecb_oracle(plaintext: &[u8], unknown_string: &[u8], key: &[u8]) -> Vec<u8> {
+    // Append unknown string to the input
+    let mut bytes = plaintext.to_vec();
+    bytes.extend_from_slice(unknown_string);
+
+    encrypt_aes_ecb(&bytes, &key)
+}
+
 pub fn detect_aes_ecb(messages: &Vec<Vec<u8>>) -> Vec<u8> {
     let mut messages_count: Vec<(&Vec<u8>, usize)> = messages
         .iter()
