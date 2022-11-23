@@ -2,6 +2,72 @@ use crate::{util, xor};
 use openssl::{cipher::Cipher, cipher_ctx::CipherCtx};
 use rand::{distributions::Uniform, thread_rng, Rng};
 
+/* ======== ECB CUT-AND-PASTE ATTACK ======== */
+pub fn ecb_cut_and_paste_admin_profile() -> Vec<u8> {
+    // Generate "valid" profiles
+    // This gives us "email=foooo@bar. | com&uid=10&role= | user"
+    // (| marks each block and is visual only)
+    let base = profile_for("foooo@bar.com");
+    println!("Encoded: {}", base);
+
+    // This gives us "email=aaaaaaaaaa | admin\v\v\v\v\v\v\v\v\v\v\v | &uid=10&role=use | r"
+    // \v is ASCII 11, we use it as padding
+    let admin = profile_for(
+        &("aaaaaaaaaaadmin".to_string()
+            + &[11u8; 11]
+                .iter()
+                .map(|&byte| byte as char)
+                .collect::<String>()),
+    );
+    println!("Admin string: {}", admin);
+
+    let (encrypt, decrypt) = gen_aes_ecb_encrypt_decrypt_oracles();
+
+    // Generate "valid" ciphertexts from valid profiles
+    let ciphertext_base = encrypt(&util::ascii_to_bytes(&base));
+    println!("Base ciphertext: {}", util::bytes_to_hex(&ciphertext_base));
+
+    let ciphertext_admin = encrypt(&util::ascii_to_bytes(&admin));
+    println!(
+        "Admin ciphertext: {}",
+        util::bytes_to_hex(&ciphertext_admin)
+    );
+
+    // Cut and paste the ciphertexts to form admin profile
+    let mut ciphertext_combined = Vec::from(&ciphertext_base[..32]);
+    ciphertext_combined.extend_from_slice(&ciphertext_admin[16..32]);
+    println!(
+        "Combined ciphertext: {}",
+        util::bytes_to_hex(&ciphertext_combined)
+    );
+
+    let plaintext = decrypt(&ciphertext_combined);
+
+    plaintext
+}
+
+pub fn gen_aes_ecb_encrypt_decrypt_oracles(
+) -> (impl Fn(&[u8]) -> Vec<u8>, impl Fn(&[u8]) -> Vec<u8>) {
+    let mut key = [0u8; 16];
+    thread_rng().fill(&mut key);
+
+    (
+        move |plaintext: &[u8]| encrypt_aes_ecb(plaintext, &key),
+        move |ciphertext: &[u8]| decrypt_aes_ecb(ciphertext, &key),
+    )
+}
+
+pub fn profile_for(email: &str) -> String {
+    let profile = [
+        ("email".to_string(), email.to_string()),
+        ("uid".to_string(), 10u8.to_string()),
+        ("role".to_string(), "user".to_string()),
+    ];
+
+    encode_to_query_string(&profile)
+}
+
+/* ======== BOTH ======== */
 pub fn detect_aes_ecb_from_oracle(oracle: impl Fn(&[u8]) -> Vec<u8>) -> bool {
     let bytes = [b'\0'; 16 * 3];
     let encrypted = oracle(&bytes);
@@ -200,6 +266,60 @@ pub fn pad_pkcs7(message: &[u8], block_size: usize) -> Vec<u8> {
     padded.append(&mut vec![pad_length as u8; pad_length]);
 
     padded
+}
+
+fn encode_to_query_string(query: &[(String, String)]) -> String {
+    let metacharacters = ['&', '='];
+
+    query
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                encode_meta(key, &metacharacters),
+                encode_meta(value, &metacharacters)
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("&")
+}
+
+pub fn parse_query_string(str: &str) -> Vec<(String, String)> {
+    str.split_terminator('&')
+        .fold(Vec::new(), |mut acc, query| {
+            if let Some((key, value)) = query.split_once('=') {
+                acc.push((decode_meta(&key), decode_meta(&value)));
+                acc
+            } else {
+                panic!("Invalid query string format")
+            }
+        })
+}
+
+fn encode_meta(str: &str, meta: &[char]) -> String {
+    str.chars()
+        .flat_map(|c| {
+            if meta.contains(&c) {
+                format!("%{}", util::bytes_to_hex(&[c as u8]))
+                    .chars()
+                    .collect::<Vec<char>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
+}
+
+fn decode_meta(query: &str) -> String {
+    let mut decoded = String::new();
+    let mut i_prev = 0;
+    for (i, _) in query.match_indices('%') {
+        decoded.push_str(&query[i_prev..i]);
+        decoded.push(util::hex_to_bytes(&query[i + 1..=i + 2])[0] as char);
+        i_prev = i + 3;
+    }
+    decoded.push_str(&query[i_prev..]);
+    decoded
 }
 
 fn find_repeated_blocks(message: &[u8], block_size: usize) -> usize {
