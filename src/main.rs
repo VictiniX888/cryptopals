@@ -12,9 +12,9 @@ fn main() {
                 YnkK",
     );
 
-    let oracle = aes::gen_aes_ecb_oracle_padded(&unknown_string);
+    let oracle = aes::ecb::gen_aes_ecb_oracle_padded(&unknown_string);
 
-    let decrypted = aes::decrypt_aes_ecb_with_oracle(oracle);
+    let decrypted = aes::ecb::decrypt_aes_ecb_with_oracle(oracle);
 
     println!("{}", util::bytes_to_ascii(&decrypted));
 }
