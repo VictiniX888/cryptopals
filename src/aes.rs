@@ -144,27 +144,52 @@ pub fn encrypt_aes_cbc(bytes: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
 
 /* ========== ECB ========== */
 pub fn decrypt_aes_ecb_with_oracle(oracle: impl Fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
-    // Find block size of cipher (should be 16)
     let encrypted = oracle(&[]);
+
+    // Find block offset
+    let corrupted = oracle(&[0]);
+
+    let offset = encrypted
+        .iter()
+        .zip(corrupted.iter())
+        .enumerate()
+        .find(|(_, (b1, b2))| b1 != b2)
+        .unwrap()
+        .0;
+
+    // Find block size of cipher (should be 16)
     let mut block_size = 0;
-    for i in 1..encrypted.len() {
-        if &oracle(&vec![0; i])[i..i * 2] == &encrypted[..i] {
+    for i in 1..(encrypted.len() - offset) {
+        if &oracle(&vec![0; i])[offset + i * 2..offset + i * 3]
+            == &encrypted[offset + i..offset + i * 2]
+        {
             block_size = i;
             break;
         }
     }
     assert_eq!(block_size, 16);
 
-    // Check that function is using ECB
-    let is_ecb = detect_aes_ecb_from_oracle(&oracle);
-    assert!(is_ecb);
+    assert_eq!(offset % block_size, 0);
+    let offset_block = offset / block_size;
+
+    // Find partial offset (block_size - extra prefix bytes in last prefix block)
+    // This also checks if the function is using ECB
+    let offset_partial = (1..=block_size).find(|i| {
+        let encrypted = oracle(&vec![0; i + block_size * 2]);
+        &encrypted[offset + block_size..offset + block_size * 2]
+            == &encrypted[offset + block_size * 2..offset + block_size * 3]
+    });
+
+    assert_ne!(offset_partial, None);
+    let offset_partial = offset_partial.unwrap();
 
     let mut unknown_string = Vec::with_capacity(encrypted.len());
 
     // Decrypt unknown string
-    for block in 0..(encrypted.len() / block_size) {
-        let mut input = vec![0; block_size];
-        while !input.is_empty() {
+    let aligned = oracle(&vec![0; offset_partial]);
+    for block in offset_block + 1..aligned.len() / block_size {
+        let mut input = vec![0; offset_partial + block_size];
+        while input.len() > offset_partial {
             // Make input block that is 1 byte short
             input.pop();
 
@@ -188,6 +213,23 @@ pub fn decrypt_aes_ecb_with_oracle(oracle: impl Fn(&[u8]) -> Vec<u8>) -> Vec<u8>
     }
 
     unknown_string
+}
+
+pub fn gen_aes_ecb_oracle_padded(unknown_string: &[u8]) -> impl Fn(&[u8]) -> Vec<u8> {
+    let unknown_string = unknown_string.to_vec();
+
+    let mut rng = thread_rng();
+
+    let mut key = [0u8; 16];
+    rng.fill(&mut key);
+
+    let random_prefix: Vec<u8> = (0..rng.gen_range(0..=64)).map(|_| rng.gen()).collect();
+
+    move |plaintext: &[u8]| {
+        let mut input = random_prefix.clone();
+        input.extend_from_slice(plaintext);
+        aes_ecb_oracle(&input, &unknown_string, &key)
+    }
 }
 
 pub fn gen_aes_ecb_oracle(unknown_string: &[u8]) -> impl Fn(&[u8]) -> Vec<u8> {
