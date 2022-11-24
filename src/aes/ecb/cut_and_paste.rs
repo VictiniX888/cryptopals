@@ -63,5 +63,5 @@ pub fn profile_for(email: &str) -> String {
         ("role".to_string(), "user".to_string()),
     ];
 
-    super::super::encode_to_query_string(&profile)
+    super::super::encode_to_query_string(&profile, '&', '=')
 }

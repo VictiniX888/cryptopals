@@ -84,20 +84,21 @@ fn validate_pkcs7(message: &[u8]) -> bool {
     false
 }
 
-fn encode_to_query_string(query: &[(String, String)]) -> String {
-    let metacharacters = ['&', '='];
+fn encode_to_query_string(query: &[(String, String)], sep: char, middle: char) -> String {
+    let metacharacters = [sep, middle];
 
     query
         .iter()
         .map(|(key, value)| {
             format!(
-                "{}={}",
+                "{}{}{}",
                 encode_meta(key, &metacharacters),
+                middle,
                 encode_meta(value, &metacharacters)
             )
         })
         .collect::<Vec<String>>()
-        .join("&")
+        .join(&sep.to_string())
 }
 
 pub fn parse_query_string(str: &str) -> Vec<(String, String)> {
@@ -112,7 +113,7 @@ pub fn parse_query_string(str: &str) -> Vec<(String, String)> {
         })
 }
 
-fn encode_meta(str: &str, meta: &[char]) -> String {
+pub fn encode_meta(str: &str, meta: &[char]) -> String {
     str.chars()
         .flat_map(|c| {
             if meta.contains(&c) {
@@ -126,7 +127,7 @@ fn encode_meta(str: &str, meta: &[char]) -> String {
         .collect()
 }
 
-fn decode_meta(query: &str) -> String {
+pub fn decode_meta(query: &str) -> String {
     let mut decoded = String::new();
     let mut i_prev = 0;
     for (i, _) in query.match_indices('%') {
