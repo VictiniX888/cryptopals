@@ -60,6 +60,30 @@ pub fn pad_pkcs7(message: &[u8], block_size: usize) -> Vec<u8> {
     padded
 }
 
+pub fn strip_pkcs7(message: &[u8]) -> Result<Vec<u8>, String> {
+    if validate_pkcs7(message) {
+        Ok(Vec::from(
+            &message[..message.len() - *(message.last().unwrap()) as usize],
+        ))
+    } else {
+        Err("Invalid PKCS#7 padding".to_string())
+    }
+}
+
+fn validate_pkcs7(message: &[u8]) -> bool {
+    if let Some(&padding) = message.last() {
+        if message.len() >= padding.into() {
+            return message
+                .iter()
+                .rev()
+                .take(padding.into())
+                .all(|&b| b == padding);
+        }
+    }
+
+    false
+}
+
 fn encode_to_query_string(query: &[(String, String)]) -> String {
     let metacharacters = ['&', '='];
 
