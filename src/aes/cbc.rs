@@ -1,4 +1,5 @@
 pub mod bitflipping;
+pub mod padding_oracle;
 
 use super::ecb;
 use crate::xor;

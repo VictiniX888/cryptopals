@@ -71,6 +71,10 @@ pub fn strip_pkcs7(message: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn validate_pkcs7(message: &[u8]) -> bool {
+    if message.last() == Some(&0) {
+        return false;
+    }
+
     if let Some(&padding) = message.last() {
         if message.len() >= padding.into() {
             return message
