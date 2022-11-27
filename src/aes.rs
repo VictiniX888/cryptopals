@@ -1,4 +1,5 @@
 pub mod cbc;
+pub mod ctr;
 pub mod ecb;
 
 use crate::util;
