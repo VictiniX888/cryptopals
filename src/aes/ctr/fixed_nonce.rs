@@ -1,6 +1,22 @@
 use crate::{aes, util, xor};
 use rand::{thread_rng, Rng};
 
+pub fn decrypt_fixed_nonce_ctr_statistically(ciphertexts: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let min_len = ciphertexts.iter().map(|bytes| bytes.len()).min().unwrap();
+
+    let concat_ciphertext: Vec<u8> = ciphertexts
+        .iter()
+        .flat_map(|bytes| (&bytes[..min_len]).to_vec())
+        .collect();
+
+    let res = xor::decrypt_repeating_key_xor(&concat_ciphertext, min_len);
+
+    res.message
+        .chunks(min_len)
+        .map(|bytes| bytes.to_vec())
+        .collect()
+}
+
 // The plaintext guessed is hardcoded for this specific challenge
 pub fn decrypt_fixed_nonce_ctr_substitution() {
     let plaintext = "SSBoYXZlIG1ldCB0aGVtIGF0IGNsb3NlIG9mIGRheQ==
@@ -49,14 +65,8 @@ QSB0ZXJyaWJsZSBiZWF1dHkgaXMgYm9ybi4=";
         .map(|str| util::base64_to_bytes(str))
         .collect();
 
-    let key: [u8; 16] = thread_rng().gen();
     let nonce = 0u64.to_le_bytes();
-    assert!(nonce.len() == 8);
-
-    let ciphertexts: Vec<Vec<u8>> = plaintexts
-        .iter()
-        .map(|bytes| aes::ctr::encrypt_aes_ctr(bytes, &key, &nonce))
-        .collect();
+    let ciphertexts = encrypt_fixed_nonce_ctr(&plaintexts, &nonce);
 
     for ciphertext in ciphertexts.iter() {
         for b in ciphertext {
@@ -86,4 +96,14 @@ QSB0ZXJyaWJsZSBiZWF1dHkgaXMgYm9ybi4=";
     for (i, guess) in guessed_plaintexts.iter().enumerate() {
         println!("{:>2} {}", i, guess);
     }
+}
+
+pub fn encrypt_fixed_nonce_ctr(plaintexts: &[Vec<u8>], nonce: &[u8]) -> Vec<Vec<u8>> {
+    let key: [u8; 16] = thread_rng().gen();
+    assert!(nonce.len() == 8);
+
+    plaintexts
+        .iter()
+        .map(|bytes| aes::ctr::encrypt_aes_ctr(bytes, &key, nonce))
+        .collect()
 }
