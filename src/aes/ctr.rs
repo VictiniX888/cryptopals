@@ -1,3 +1,5 @@
+pub mod fixed_nonce;
+
 use std::{collections::VecDeque, iter::from_fn};
 
 use super::ecb;
